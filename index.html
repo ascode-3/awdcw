@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>물체 충격량 시뮬레이션</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* 기본 폰트 설정 */
+        body {
+            font-family: 'Inter', sans-serif;
+            user-select: none; /* 드래그 시 텍스트 선택 방지 */
+        }
+        /* 선택된 버튼 스타일 */
+        .direction-button.selected {
+            background-color: #3b82f6; /* blue-500 */
+            color: white;
+        }
+        /* 선택된 물체 스타일 */
+        .object-element.selected {
+            outline: 3px solid #facc15; /* yellow-400 */
+            outline-offset: 2px;
+        }
+        /* 물체 기본 스타일 */
+        .object-element {
+            width: 50px; /* 너비 고정 */
+            height: 50px; /* 높이 고정 */
+            border-radius: 0.375rem; /* rounded-md */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600; /* font-semibold */
+            color: white;
+            position: absolute;
+            bottom: 10px; /* 바닥선 위에 배치 */
+            cursor: grab; /* 드래그 가능 커서 */
+            transition: transform 0.05s linear; /* 드래그 시 부드러운 이동 효과 (약간 줄임) */
+        }
+        .object-element:active {
+             cursor: grabbing; /* 드래그 중 커서 */
+        }
+        /* 거리 표시 줄 스타일 */
+        .distance-line {
+            position: absolute;
+            height: 2px;
+            background-color: #6b7280; /* gray-500 */
+            bottom: 35px; /* 물체 중앙 높이 근처 */
+            z-index: 5; /* 물체보다 뒤 */
+            pointer-events: none; /* 줄이 마우스 이벤트 방해하지 않도록 */
+        }
+        .distance-text {
+            position: absolute;
+            bottom: 45px; /* 줄 위에 텍스트 표시 */
+            background-color: white;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            z-index: 6;
+            border: 1px solid #e5e7eb; /* gray-200 */
+            pointer-events: none; /* 텍스트가 마우스 이벤트 방해하지 않도록 */
+        }
+        /* 메시지 박스 스타일 */
+        #message-box {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #ef4444; /* red-500 */
+            color: white;
+            padding: 10px 20px;
+            border-radius: 0.375rem; /* rounded-md */
+            z-index: 100;
+            display: none; /* 초기에는 숨김 */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        /* 속성 패널 닫기 버튼 */
+        #close-properties-btn {
+            position: absolute;
+            top: 0.5rem; /* 8px */
+            right: 0.5rem; /* 8px */
+            background: none;
+            border: none;
+            font-size: 1.5rem; /* 24px */
+            line-height: 1;
+            color: #9ca3af; /* gray-400 */
+            cursor: pointer;
+            padding: 0.25rem; /* 4px */
+        }
+        #close-properties-btn:hover {
+            color: #374151; /* gray-700 */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-4 lg:p-8 flex flex-col h-screen">
+
+    <div class="flex flex-wrap gap-2 mb-4">
+        <button id="create-object-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-md shadow">🔲 물체 생성</button>
+        <button id="delete-object-btn" class="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded-md shadow" disabled>🗑️ 물체 삭제</button>
+        <button id="create-line-btn" class="bg-green-500 hover:bg-green-600 text-white font-medium py-2 px-4 rounded-md shadow" disabled>📏 줄 생성</button>
+    </div>
+
+    <div class="flex flex-grow gap-4 flex-col lg:flex-row overflow-hidden">
+
+        <div class="flex-grow lg:w-2/3 bg-white rounded-lg shadow p-4 flex flex-col relative overflow-hidden">
+            <h2 class="text-lg font-semibold mb-2 text-gray-700">시뮬레이션 영역</h2>
+            <div id="simulation-canvas" class="flex-grow border border-gray-300 rounded-md relative bg-gray-50 overflow-x-auto overflow-y-hidden">
+                <div class="absolute bottom-0 left-0 w-full h-2 bg-gray-400"></div> </div>
+            <div class="mt-4 flex items-center justify-center gap-4">
+                <button id="start-btn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-full shadow">▶️ 시작</button>
+                <button id="pause-btn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-full shadow" disabled>⏯ 멈춤</button>
+                <div class="text-gray-700">시간: <span id="simulation-time">0.00</span> s</div>
+            </div>
+        </div>
+
+        <div class="lg:w-1/3 flex flex-col gap-4">
+            <div id="properties-panel" class="bg-white rounded-lg shadow p-4 h-auto lg:h-1/2 hidden relative">
+                 <button id="close-properties-btn" title="닫기">&times;</button>
+                <h2 class="text-lg font-semibold mb-3 text-gray-700">물체 <span id="selected-object-name" class="font-bold"></span> 속성</h2>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-600 mb-1">방향:</label>
+                        <div class="flex gap-2">
+                            <button id="direction-left" data-direction="-1" class="direction-button flex-1 border border-gray-300 py-1 px-3 rounded-md text-gray-700 hover:bg-gray-100">← 왼쪽</button>
+                            <button id="direction-right" data-direction="1" class="direction-button flex-1 border border-gray-300 py-1 px-3 rounded-md text-gray-700 hover:bg-gray-100">→ 오른쪽</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="velocity-input" class="block text-sm font-medium text-gray-600 mb-1">속력 (m/s):</label>
+                        <input type="number" id="velocity-input" min="0" step="0.1" class="w-full border border-gray-300 rounded-md p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500" placeholder="예: 5.00"> </div>
+                    <div>
+                        <label for="mass-input" class="block text-sm font-medium text-gray-600 mb-1">질량 (kg):</label>
+                        <input type="number" id="mass-input" min="0.1" step="0.1" class="w-full border border-gray-300 rounded-md p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500" placeholder="예: 10.0">
+                    </div>
+                </div>
+            </div>
+             <div class="bg-white rounded-lg shadow p-4 flex-grow overflow-auto">
+                <h2 class="text-lg font-semibold mb-2 text-gray-700">📊 결과값 (실시간)</h2>
+                <div class="mb-2 text-sm text-gray-600">총 운동량 (충돌 전): <span id="total-momentum-before" class="font-medium">0.00</span> kg·m/s</div>
+                <div class="mb-3 text-sm text-gray-600">총 운동량 (충돌 후): <span id="total-momentum-after" class="font-medium">0.00</span> kg·m/s</div>
+                <div class="overflow-x-auto">
+                    <table id="results-table" class="w-full text-sm text-left text-gray-600">
+                        <thead class="text-xs text-gray-700 uppercase bg-gray-100">
+                            <tr>
+                                <th scope="col" class="px-4 py-2">물체</th>
+                                <th scope="col" class="px-4 py-2">초기 질량 (kg)</th>
+                                <th scope="col" class="px-4 py-2">초기 속도 (m/s)</th>
+                                <th scope="col" class="px-4 py-2">나중 속도 (m/s)</th>
+                                <th scope="col" class="px-4 py-2">초기 운동량</th>
+                                <th scope="col" class="px-4 py-2">나중 운동량</th>
+                                <th scope="col" class="px-4 py-2">충격량 (Δp)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="message-box">메시지 내용</div>
+
+    <script>
+        // --- DOM 요소 가져오기 ---
+        const createObjectBtn = document.getElementById('create-object-btn');
+        const deleteObjectBtn = document.getElementById('delete-object-btn');
+        const createLineBtn = document.getElementById('create-line-btn');
+        const simulationCanvas = document.getElementById('simulation-canvas');
+        const propertiesPanel = document.getElementById('properties-panel');
+        const closePropertiesBtn = document.getElementById('close-properties-btn'); // 닫기 버튼 추가
+        const selectedObjectName = document.getElementById('selected-object-name');
+        const directionLeftBtn = document.getElementById('direction-left');
+        const directionRightBtn = document.getElementById('direction-right');
+        const velocityInput = document.getElementById('velocity-input');
+        const massInput = document.getElementById('mass-input');
+        const startBtn = document.getElementById('start-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+        const simulationTimeDisplay = document.getElementById('simulation-time');
+        const resultsTableBody = document.querySelector('#results-table tbody');
+        const totalMomentumBeforeDisplay = document.getElementById('total-momentum-before');
+        const totalMomentumAfterDisplay = document.getElementById('total-momentum-after');
+        const messageBox = document.getElementById('message-box');
+
+        // --- 시뮬레이션 상태 변수 ---
+        let objects = []; // { id, name, element, x, y, vx, vy=0, mass, initialVx, initialMass, finalVx, impulse, collided }
+        let selectedObjects = []; // 선택된 물체 ID 저장 배열
+        let distanceLine = null; // 거리 측정 줄 요소 { line, text, obj1Id, obj2Id }
+        let nextObjectId = 0; // 다음 물체 ID (A=0, B=1, ...)
+        let simulationRunning = false;
+        let animationFrameId = null;
+        let lastTimestamp = 0;
+        let simulationTime = 0;
+        const pixelsPerMeter = 50; // 1미터를 50픽셀로 표현
+        const objectWidthPixels = 50; // 물체 너비 (스타일과 일치)
+        const canvasPadding = 10; // 캔버스 내부 여백
+
+        // --- 드래그 상태 변수 ---
+        let isDragging = false;
+        let draggedObject = null;
+        let dragStartX = 0;
+        let objectStartX = 0;
+
+        // --- 유틸리티 함수 ---
+        function getObjectName(id) {
+            return String.fromCharCode(65 + id);
+        }
+
+        function showMessage(message, duration = 3000) {
+            messageBox.textContent = message;
+            messageBox.style.display = 'block';
+            messageBox.style.backgroundColor = '#f87171'; // 기본 빨간색 (오류)
+            if (message.includes('성공') || message.includes('생성') || message.includes('이동') || message.includes('시작') || message.includes('멈춤')) {
+                 messageBox.style.backgroundColor = '#34d399'; // 초록색 (성공/정보)
+            }
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, duration);
+        }
+
+        // --- 물체 관리 함수 ---
+        function createObject() {
+            if (nextObjectId >= 26) {
+                showMessage("더 이상 물체를 생성할 수 없습니다.");
+                return;
+            }
+            if (simulationRunning) {
+                 showMessage("시뮬레이션 중에는 물체를 생성할 수 없습니다.");
+                 return;
+            }
+
+            const objectId = nextObjectId++;
+            const objectName = getObjectName(objectId);
+            const objectElement = document.createElement('div');
+            objectElement.id = `object-${objectId}`;
+            objectElement.className = 'object-element bg-blue-500';
+            objectElement.textContent = objectName;
+            objectElement.dataset.id = objectId;
+
+            const initialX = canvasPadding + objectId * (objectWidthPixels + 10);
+
+            const newObject = {
+                id: objectId,
+                name: objectName,
+                element: objectElement,
+                x: initialX,
+                y: 0,
+                vx: 0,
+                mass: 1,
+                initialVx: 0,
+                initialMass: 1,
+                finalVx: 0,
+                impulse: 0,
+                collided: false,
+                direction: 1,
+            };
+
+            objectElement.style.transform = `translateX(${newObject.x}px)`;
+            // 이벤트 리스너 연결 (클릭 및 드래그 시작)
+            objectElement.addEventListener('click', handleObjectClick);
+            objectElement.addEventListener('mousedown', handleDragStart);
+
+            objects.push(newObject);
+            simulationCanvas.appendChild(objectElement);
+            updateResultsTable();
+            showMessage(`${objectName} 물체 생성됨 (질량: 1kg, 속력: 0m/s)`);
+        }
+
+        function deleteObject() {
+            if (selectedObjects.length !== 1) {
+                showMessage("삭제할 물체 하나를 선택하세요.");
+                return;
+            }
+            if (simulationRunning) {
+                showMessage("시뮬레이션 중에는 삭제할 수 없습니다.");
+                return;
+            }
+
+            const objectIdToDelete = selectedObjects[0];
+            const objectIndex = objects.findIndex(obj => obj.id === objectIdToDelete);
+
+            if (objectIndex > -1) {
+                const deletedObjectName = objects[objectIndex].name;
+                if (distanceLine && (distanceLine.obj1Id === objectIdToDelete || distanceLine.obj2Id === objectIdToDelete)) {
+                    removeDistanceLine();
+                }
+
+                objects[objectIndex].element.remove();
+                objects.splice(objectIndex, 1);
+
+                deselectAllObjects();
+                propertiesPanel.classList.add('hidden');
+                deleteObjectBtn.disabled = true;
+
+                updateResultsTable();
+                showMessage(`${deletedObjectName} 물체 삭제됨`);
+            }
+            selectedObjects = [];
+            updateButtonStates();
+        }
+
+        function handleObjectClick(event) {
+             // 드래그 중에는 클릭(선택) 로직 무시
+             if (isDragging) return;
+
+            if (simulationRunning) {
+                showMessage("시뮬레이션 중에는 물체를 선택/수정할 수 없습니다.");
+                return;
+            }
+            const clickedId = parseInt(event.target.dataset.id);
+
+            // 선택 로직 (기존과 동일)
+            if (selectedObjects.length < 2 && !selectedObjects.includes(clickedId)) {
+                selectedObjects.push(clickedId);
+                objects.find(obj => obj.id === clickedId)?.element.classList.add('selected'); // Optional chaining
+            } else if (selectedObjects.includes(clickedId)) {
+                selectedObjects = [clickedId];
+                deselectAllObjects();
+                objects.find(obj => obj.id === clickedId)?.element.classList.add('selected');
+            } else {
+                 selectedObjects = [clickedId];
+                 deselectAllObjects();
+                 objects.find(obj => obj.id === clickedId)?.element.classList.add('selected');
+            }
+
+            if (selectedObjects.length === 1) {
+                const selectedObject = objects.find(obj => obj.id === selectedObjects[0]);
+                if (selectedObject) {
+                    displayObjectProperties(selectedObject); // 반올림 적용됨
+                }
+                propertiesPanel.classList.remove('hidden');
+            } else {
+                propertiesPanel.classList.add('hidden');
+            }
+
+            updateButtonStates();
+        }
+
+        function deselectAllObjects() {
+            objects.forEach(obj => obj.element.classList.remove('selected'));
+        }
+
+        // 물체 속성 표시 (반올림 적용)
+        function displayObjectProperties(obj) {
+            selectedObjectName.textContent = obj.name;
+            // 속력 표시 시 소수점 둘째 자리까지 반올림
+            velocityInput.value = Math.abs(obj.vx).toFixed(2);
+            massInput.value = obj.mass; // 질량은 그대로 표시
+            updateDirectionButtons(obj.direction);
+        }
+
+        function updateDirectionButtons(direction) {
+            if (direction === -1) {
+                directionLeftBtn.classList.add('selected');
+                directionRightBtn.classList.remove('selected');
+            } else {
+                directionRightBtn.classList.add('selected');
+                directionLeftBtn.classList.remove('selected');
+            }
+        }
+
+        function handlePropertyChange() {
+             if (selectedObjects.length !== 1) return;
+             const selectedObject = objects.find(obj => obj.id === selectedObjects[0]);
+             if (!selectedObject || simulationRunning) return;
+
+             // 입력값은 그대로 사용 (내부 계산은 정확한 값 유지)
+             const newMass = parseFloat(massInput.value);
+             const newSpeed = parseFloat(velocityInput.value); // 입력된 값 사용
+             const currentDirection = selectedObject.direction;
+
+             if (!isNaN(newMass) && newMass > 0) {
+                 selectedObject.mass = newMass;
+                 selectedObject.initialMass = newMass;
+             } else {
+                 showMessage("질량은 0보다 커야 합니다.");
+                 massInput.value = selectedObject.mass;
+             }
+
+             if (!isNaN(newSpeed) && newSpeed >= 0) {
+                 // 내부 속도(vx)는 정확한 값으로 계산
+                 selectedObject.vx = newSpeed * currentDirection;
+                 selectedObject.initialVx = selectedObject.vx;
+             } else {
+                 showMessage("속력은 0 이상이어야 합니다.");
+                 // 표시 값만 반올림해서 복원
+                 velocityInput.value = Math.abs(selectedObject.vx).toFixed(2);
+             }
+             // 속성 변경 후에도 표시 값 업데이트 (반올림 적용)
+             displayObjectProperties(selectedObject);
+             updateResultsTable(); // 테이블도 업데이트
+        }
+
+        function handleDirectionChange(event) {
+            if (selectedObjects.length !== 1 || simulationRunning) return;
+            const selectedObject = objects.find(obj => obj.id === selectedObjects[0]);
+            if (!selectedObject) return;
+
+            const newDirection = parseInt(event.target.dataset.direction);
+            selectedObject.direction = newDirection;
+            const currentSpeed = Math.abs(selectedObject.vx);
+            selectedObject.vx = currentSpeed * newDirection;
+            selectedObject.initialVx = selectedObject.vx;
+
+            updateDirectionButtons(newDirection);
+            // 방향 변경 후 표시 값 업데이트 (반올림 적용)
+            displayObjectProperties(selectedObject);
+            updateResultsTable();
+        }
+
+        // --- 속성 패널 닫기 ---
+        function closePropertiesPanel() {
+            propertiesPanel.classList.add('hidden');
+        }
+
+        // --- 거리 측정 줄 함수 ---
+        function createDistanceLine() {
+            if (selectedObjects.length !== 2) {
+                showMessage("거리 측정을 위해 물체 2개를 선택하세요.");
+                return;
+            }
+            if (simulationRunning) {
+                showMessage("시뮬레이션 중에는 줄을 생성할 수 없습니다.");
+                return;
+            }
+
+            removeDistanceLine();
+
+            const obj1 = objects.find(obj => obj.id === selectedObjects[0]);
+            const obj2 = objects.find(obj => obj.id === selectedObjects[1]);
+
+            if (!obj1 || !obj2) return;
+
+            const lineElement = document.createElement('div');
+            lineElement.className = 'distance-line';
+            const textElement = document.createElement('div');
+            textElement.className = 'distance-text';
+
+            distanceLine = {
+                line: lineElement,
+                text: textElement,
+                obj1Id: obj1.id,
+                obj2Id: obj2.id
+            };
+
+            simulationCanvas.appendChild(lineElement);
+            simulationCanvas.appendChild(textElement);
+            updateDistanceLine(); // 거리 표시 시 반올림 적용됨
+            showMessage("거리 측정 줄 생성됨");
+        }
+
+        // 거리 표시 (반올림 적용)
+        function updateDistanceLine() {
+            if (!distanceLine) return;
+
+            const obj1 = objects.find(obj => obj.id === distanceLine.obj1Id);
+            const obj2 = objects.find(obj => obj.id === distanceLine.obj2Id);
+
+            if (!obj1 || !obj2) {
+                removeDistanceLine();
+                return;
+            }
+
+            const center1X = obj1.x + objectWidthPixels / 2;
+            const center2X = obj2.x + objectWidthPixels / 2;
+
+            const startX = Math.min(center1X, center2X);
+            const endX = Math.max(center1X, center2X);
+            const width = endX - startX;
+            const distanceMeters = width / pixelsPerMeter;
+
+            distanceLine.line.style.left = `${startX}px`;
+            distanceLine.line.style.width = `${width}px`;
+            distanceLine.text.style.left = `${startX + width / 2 - 15}px`;
+            // 거리 표시 시 소수점 둘째 자리까지 반올림
+            distanceLine.text.textContent = `${distanceMeters.toFixed(2)} m`;
+        }
+
+        function removeDistanceLine() {
+            if (distanceLine) {
+                distanceLine.line.remove();
+                distanceLine.text.remove();
+                distanceLine = null;
+            }
+        }
+
+        // --- 드래그 앤 드롭 함수 ---
+        function handleDragStart(event) {
+            if (event.button !== 0) return;
+            if (simulationRunning) return;
+            const targetId = parseInt(event.target.dataset.id);
+            draggedObject = objects.find(obj => obj.id === targetId);
+            if (!draggedObject) return;
+
+            isDragging = true;
+            dragStartX = event.clientX;
+            objectStartX = draggedObject.x;
+            draggedObject.element.style.zIndex = 10;
+
+            document.addEventListener('mousemove', handleDragging);
+            document.addEventListener('mouseup', handleDragEnd);
+        }
+
+        function handleDragging(event) {
+            if (!isDragging || !draggedObject) return;
+
+            const currentMouseX = event.clientX;
+            const deltaX = currentMouseX - dragStartX;
+            let newX = objectStartX + deltaX;
+
+            const canvasWidth = simulationCanvas.clientWidth;
+            const minX = canvasPadding;
+            const maxX = canvasWidth - canvasPadding - objectWidthPixels;
+            newX = Math.max(minX, Math.min(newX, maxX));
+
+            draggedObject.x = newX; // 내부 위치는 정확한 값 유지
+            draggedObject.element.style.transform = `translateX(${newX}px)`;
+
+            if (distanceLine && (distanceLine.obj1Id === draggedObject.id || distanceLine.obj2Id === draggedObject.id)) {
+                updateDistanceLine(); // 거리 표시는 반올림 적용됨
+            }
+        }
+
+        function handleDragEnd() {
+            if (!isDragging || !draggedObject) return;
+
+            isDragging = false;
+            draggedObject.element.style.zIndex = '';
+            document.removeEventListener('mousemove', handleDragging);
+            document.removeEventListener('mouseup', handleDragEnd);
+
+            // 드래그 후 위치가 변경되었으므로 테이블 업데이트 필요 시 호출 가능
+            // updateResultsTable();
+
+            showMessage(`${draggedObject.name} 물체 이동 완료`);
+            draggedObject = null;
+        }
+
+
+        // --- 시뮬레이션 함수 ---
+        function startSimulation() {
+            if (simulationRunning) return;
+            if (isDragging) {
+                showMessage("물체를 드래그하는 중에는 시작할 수 없습니다.");
+                return;
+            }
+            simulationRunning = true;
+            startBtn.disabled = true;
+            pauseBtn.disabled = false;
+            createObjectBtn.disabled = true;
+            deleteObjectBtn.disabled = true;
+            createLineBtn.disabled = true;
+            velocityInput.disabled = true;
+            massInput.disabled = true;
+            directionLeftBtn.disabled = true;
+            directionRightBtn.disabled = true;
+            objects.forEach(obj => obj.element.style.cursor = 'default');
+
+            objects.forEach(obj => {
+                obj.collided = false;
+                // finalVx는 시뮬레이션 중 업데이트되므로 초기화 시 vx 값 사용
+                obj.finalVx = obj.vx;
+                obj.impulse = 0;
+                // 시뮬레이션 시작 시점의 값으로 초기값 고정 (정확한 값 사용)
+                obj.initialVx = obj.vx;
+                obj.initialMass = obj.mass;
+            });
+
+            lastTimestamp = performance.now();
+            animationFrameId = requestAnimationFrame(simulationLoop);
+            showMessage("시뮬레이션 시작");
+            updateResultsTable(); // 시작 시 테이블 업데이트 (반올림 적용됨)
+        }
+
+        function pauseSimulation() {
+            if (!simulationRunning) return;
+            simulationRunning = false;
+            cancelAnimationFrame(animationFrameId);
+            startBtn.disabled = false;
+            pauseBtn.disabled = true;
+            createObjectBtn.disabled = false;
+            updateButtonStates();
+            velocityInput.disabled = false;
+            massInput.disabled = false;
+            directionLeftBtn.disabled = false;
+            directionRightBtn.disabled = false;
+             objects.forEach(obj => obj.element.style.cursor = 'grab');
+            showMessage("시뮬레이션 멈춤");
+        }
+
+        // 시뮬레이션 루프 (내부 계산은 정확한 값 사용)
+        function simulationLoop(timestamp) {
+            if (!simulationRunning) return;
+
+            const deltaTime = (timestamp - lastTimestamp) / 1000;
+            lastTimestamp = timestamp;
+            simulationTime += deltaTime;
+            // 시간 표시는 반올림
+            simulationTimeDisplay.textContent = simulationTime.toFixed(2);
+
+            // 1. 위치 업데이트 (정확한 값 사용)
+            objects.forEach(obj => {
+                obj.x += obj.vx * pixelsPerMeter * deltaTime;
+            });
+
+            // 2. 충돌 감지 및 처리 (정확한 값 사용)
+            let collisionOccurred = false;
+            for (let i = 0; i < objects.length; i++) {
+                for (let j = i + 1; j < objects.length; j++) {
+                    const obj1 = objects[i];
+                    const obj2 = objects[j];
+
+                    const distance = Math.abs((obj1.x + objectWidthPixels / 2) - (obj2.x + objectWidthPixels / 2));
+                    const collisionThreshold = objectWidthPixels;
+
+                    if (distance < collisionThreshold) {
+                        // 겹침 해결 (정확한 값 사용)
+                        const overlap = collisionThreshold - distance;
+                        const moveCorrection = overlap / 2 + 0.1;
+                         if (obj1.x < obj2.x) {
+                             if (obj1.vx > obj2.vx) {
+                                 obj1.x -= moveCorrection * (Math.abs(obj1.vx) / (Math.abs(obj1.vx) + Math.abs(obj2.vx)) || 0.5);
+                                 obj2.x += moveCorrection * (Math.abs(obj2.vx) / (Math.abs(obj1.vx) + Math.abs(obj2.vx)) || 0.5);
+                             }
+                         } else {
+                              if (obj2.vx > obj1.vx) {
+                                 obj1.x += moveCorrection * (Math.abs(obj1.vx) / (Math.abs(obj1.vx) + Math.abs(obj2.vx)) || 0.5);
+                                 obj2.x -= moveCorrection * (Math.abs(obj2.vx) / (Math.abs(obj1.vx) + Math.abs(obj2.vx)) || 0.5);
+                             }
+                         }
+
+                         // 탄성 충돌 계산 (정확한 값 사용)
+                         const relativeVelocity = obj1.vx - obj2.vx;
+                         const relativePosition = obj1.x - obj2.x;
+                         if (relativeVelocity * relativePosition < 0) {
+                            const m1 = obj1.mass;
+                            const m2 = obj2.mass;
+                            const v1 = obj1.vx; // 충돌 직전 속도 (정확한 값)
+                            const v2 = obj2.vx; // 충돌 직전 속도 (정확한 값)
+
+                            // 충돌 후 속도 계산 (정확한 값)
+                            const newV1 = ((m1 - m2) / (m1 + m2)) * v1 + ((2 * m2) / (m1 + m2)) * v2;
+                            const newV2 = ((2 * m1) / (m1 + m2)) * v1 + ((m2 - m1) / (m1 + m2)) * v2;
+
+                            // 충격량 계산 (정확한 값)
+                            const impulse1 = m1 * newV1 - m1 * v1;
+                            const impulse2 = m2 * newV2 - m2 * v2;
+
+                            // 내부 상태 업데이트 (정확한 값)
+                            obj1.vx = newV1;
+                            obj2.vx = newV2;
+                            obj1.finalVx = newV1; // 마지막 충돌 후 속도 저장
+                            obj2.finalVx = newV2; // 마지막 충돌 후 속도 저장
+                            obj1.impulse = impulse1; // 마지막 충돌 충격량 저장
+                            obj2.impulse = impulse2; // 마지막 충돌 충격량 저장
+                            obj1.collided = true;
+                            obj2.collided = true;
+                            obj1.direction = Math.sign(newV1) || obj1.direction;
+                            obj2.direction = Math.sign(newV2) || obj2.direction;
+                            collisionOccurred = true;
+                         }
+                    }
+                }
+            }
+
+            // 3. 경계 처리 (정확한 값 사용)
+            const canvasWidth = simulationCanvas.clientWidth;
+            objects.forEach(obj => {
+                const rightBoundary = canvasWidth - canvasPadding - objectWidthPixels;
+                if (obj.x < canvasPadding && obj.vx < 0) {
+                    obj.x = canvasPadding;
+                    const v_before = obj.vx;
+                    obj.vx *= -1;
+                    obj.direction *= -1;
+                    obj.finalVx = obj.vx;
+                    obj.impulse = obj.mass * obj.finalVx - obj.mass * v_before;
+                    obj.collided = true;
+                    collisionOccurred = true;
+                } else if (obj.x > rightBoundary && obj.vx > 0) {
+                    obj.x = rightBoundary;
+                     const v_before = obj.vx;
+                    obj.vx *= -1;
+                    obj.direction *= -1;
+                    obj.finalVx = obj.vx;
+                    obj.impulse = obj.mass * obj.finalVx - obj.mass * v_before;
+                    obj.collided = true;
+                    collisionOccurred = true;
+                }
+            });
+
+            // 4. 화면 업데이트 (위치 업데이트는 정확한 값 기반)
+            objects.forEach(obj => {
+                obj.element.style.transform = `translateX(${obj.x}px)`;
+            });
+            if (distanceLine) {
+                updateDistanceLine(); // 거리 표시는 반올림 적용됨
+            }
+            // 충돌 발생 시 테이블 업데이트 (반올림 적용됨)
+            if (collisionOccurred) {
+                updateResultsTable();
+            }
+
+            animationFrameId = requestAnimationFrame(simulationLoop);
+        }
+
+        // 결과 테이블 업데이트 (표시 값 반올림 적용)
+        function updateResultsTable() {
+            resultsTableBody.innerHTML = '';
+            let totalInitialMomentum = 0;
+            let totalCurrentMomentum = 0; // 현재 운동량 합계 (정확한 값 기반)
+
+            objects.forEach(obj => {
+                // 계산용 값 (정확한 값)
+                const initialMomentumExact = obj.initialMass * obj.initialVx;
+                const currentMomentumExact = obj.mass * obj.vx;
+                const impulseExact = obj.impulse; // 마지막 충돌 시 계산된 정확한 값
+
+                totalInitialMomentum += initialMomentumExact;
+                totalCurrentMomentum += currentMomentumExact;
+
+                // 표시용 값 (소수점 둘째 자리까지 반올림)
+                const initialMassDisplay = obj.initialMass.toFixed(2);
+                const initialVxDisplay = obj.initialVx.toFixed(2);
+                const currentVxDisplay = obj.vx.toFixed(2); // 현재 속도 표시
+                const initialMomentumDisplay = initialMomentumExact.toFixed(2);
+                const currentMomentumDisplay = currentMomentumExact.toFixed(2); // 현재 운동량 표시
+                const impulseDisplay = impulseExact.toFixed(2); // 충격량 표시
+
+                const row = `
+                    <tr class="bg-white border-b hover:bg-gray-50">
+                        <td class="px-4 py-2 font-medium text-gray-900">${obj.name}</td>
+                        <td class="px-4 py-2">${initialMassDisplay}</td>
+                        <td class="px-4 py-2">${initialVxDisplay}</td>
+                        <td class="px-4 py-2">${currentVxDisplay}</td>
+                        <td class="px-4 py-2">${initialMomentumDisplay}</td>
+                        <td class="px-4 py-2">${currentMomentumDisplay}</td>
+                        <td class="px-4 py-2">${impulseDisplay}</td>
+                    </tr>
+                `;
+                resultsTableBody.innerHTML += row;
+            });
+
+            // 총 운동량 표시 (반올림 적용)
+            totalMomentumBeforeDisplay.textContent = totalInitialMomentum.toFixed(2);
+            totalMomentumAfterDisplay.textContent = totalCurrentMomentum.toFixed(2);
+        }
+
+        // --- 버튼 상태 업데이트 ---
+        function updateButtonStates() {
+            deleteObjectBtn.disabled = selectedObjects.length !== 1 || simulationRunning;
+            createLineBtn.disabled = selectedObjects.length !== 2 || simulationRunning;
+        }
+
+
+        // --- 이벤트 리스너 연결 ---
+        createObjectBtn.addEventListener('click', createObject);
+        deleteObjectBtn.addEventListener('click', deleteObject);
+        createLineBtn.addEventListener('click', createDistanceLine);
+        startBtn.addEventListener('click', startSimulation);
+        pauseBtn.addEventListener('click', pauseSimulation);
+        closePropertiesBtn.addEventListener('click', closePropertiesPanel);
+
+        velocityInput.addEventListener('change', handlePropertyChange);
+        massInput.addEventListener('change', handlePropertyChange);
+        directionLeftBtn.addEventListener('click', handleDirectionChange);
+        directionRightBtn.addEventListener('click', handleDirectionChange);
+
+        // --- 초기화 ---
+        updateResultsTable(); // 초기 테이블 표시 (반올림 적용됨)
+        updateButtonStates();
+
+        
+
+    </script>
+</body>
+</html>
